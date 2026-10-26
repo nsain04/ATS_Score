@@ -11,11 +11,16 @@ DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 def _backend_url() -> str:
     env_url = os.getenv("BACKEND_URL")
     if env_url:
-        return env_url
-    try:
-        return st.secrets["backend"]["url"]
-    except (KeyError, FileNotFoundError, AttributeError):
-        return DEFAULT_BACKEND_URL
+        return env_url.rstrip("/")
+    if hasattr(st, "secrets"):
+        try:
+            if "BACKEND_URL" in st.secrets:
+                return str(st.secrets["BACKEND_URL"]).rstrip("/")
+            if "backend" in st.secrets and "url" in st.secrets["backend"]:
+                return str(st.secrets["backend"]["url"]).rstrip("/")
+        except Exception:
+            pass
+    return DEFAULT_BACKEND_URL.rstrip("/")
 
 
 def _auth_headers(access_token: str) -> Dict[str, str]:

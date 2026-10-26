@@ -16,14 +16,31 @@ except ImportError:
 
 
 def _secret(key: str, section: str = 'supabase') -> str:
-    """Read from env first, then fall back to st.secrets[section][key]."""
+    """Read from env first, then fall back to flat or sectioned st.secrets."""
     val = os.getenv(key, '')
     if val:
-        return val
-    try:
-        return st.secrets[section][key]
-    except (KeyError, FileNotFoundError, AttributeError):
-        return ''
+        return val.strip()
+    if hasattr(st, 'secrets'):
+        try:
+            # Check flat top-level key: e.g. SUPABASE_URL or supabase_url
+            if key in st.secrets:
+                return str(st.secrets[key]).strip()
+            if key.lower() in st.secrets:
+                return str(st.secrets[key.lower()]).strip()
+            # Check sectioned key: e.g. st.secrets['supabase']['SUPABASE_URL'] or ['url']
+            if section in st.secrets:
+                sec = st.secrets[section]
+                if key in sec:
+                    return str(sec[key]).strip()
+                if key.lower() in sec:
+                    return str(sec[key.lower()]).strip()
+                # Common shorthand: e.g. st.secrets['supabase']['url']
+                shorthand = key.replace('SUPABASE_', '').lower()
+                if shorthand in sec:
+                    return str(sec[shorthand]).strip()
+        except Exception:
+            pass
+    return ''
 
 
 SUPABASE_URL = _secret('SUPABASE_URL')
@@ -31,9 +48,10 @@ SUPABASE_ANON_KEY = _secret('SUPABASE_ANON_KEY')
 
 OAUTH_REDIRECT_URL = (
     os.getenv('AUTH_REDIRECT_URL')
+    or _secret('AUTH_REDIRECT_URL')
     or _secret('redirect_uri', 'google_oauth')
     or 'http://localhost:8501'
-)
+).rstrip('/')
 
 
 def _missing_config() -> str | None:

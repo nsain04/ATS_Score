@@ -52,10 +52,10 @@ app=FastAPI(
 app.add_middleware(
     CORSMiddleware, 
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.streamlit\.app",
     allow_credentials=True, 
-    allow_methods     = ['*'],
-    allow_headers     = ['*'],
-
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
 app.include_router(router)
@@ -75,10 +75,13 @@ async def root():
     }
 
 if __name__=='__main__':
+    import os
     import uvicorn
+    port = int(os.getenv('PORT', 8000))
+    is_dev = os.getenv('ENVIRONMENT', 'development').lower() == 'development'
     uvicorn.run(
         'backend.main:app',
         host    = '0.0.0.0',
-        port    = 8000,
-        reload  = True,    # Auto-restart on code changes (dev only)
+        port    = port,
+        reload  = is_dev,
     )

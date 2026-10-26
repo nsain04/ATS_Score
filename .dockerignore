@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+jupyter notebooks/
+frontend/
+packages-before-spacy-fix.txt
+README.md
