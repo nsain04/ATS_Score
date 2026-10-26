@@ -1,6 +1,6 @@
 import io
-import magic
-from typing import Tuple, Optional, Tuple
+import mimetypes
+from typing import Tuple, Optional
 
 import pdfplumber
 from docx import Document
@@ -28,6 +28,24 @@ class FileParsingError(Exception):
 class FileValidationError(Exception):
     pass
 
+def _detect_mime_type(file_data: bytes, filename: str) -> Optional[str]:
+    """Safely detect MIME type from magic header bytes, file extension, or python-magic."""
+    if file_data.startswith(b'%PDF-'):
+        return 'application/pdf'
+    if file_data.startswith(b'PK\x03\x04') and filename.lower().endswith('.docx'):
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    if file_data.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1') and filename.lower().endswith('.doc'):
+        return 'application/msword'
+
+    try:
+        import magic
+        return magic.from_buffer(file_data, mime=True)
+    except Exception:
+        pass
+
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed
+
 def validate_file(file_data:bytes, filename:str)->Tuple[bool, str, Optional[str]]:
     file_size_bytes = len(file_data)
     if file_size_bytes > MAX_FILE_SIZE_BYTES:
@@ -38,21 +56,19 @@ def validate_file(file_data:bytes, filename:str)->Tuple[bool, str, Optional[str]
         ), None
     
     if file_size_bytes==0:
-        return False, 'uploade file is empty...please check the file you have uploaded and try again'
+        return False, 'uploaded file is empty...please check the file you have uploaded and try again'
     
     try:
-        mime_type=magic.from_buffer(file_data, mime=True)
+        mime_type = _detect_mime_type(file_data, filename)
     except Exception as e:
-        return False, f"error deteminin the file type : {e}", None
+        return False, f"error determining the file type : {e}", None
     
-    if mime_type not in SUPPORTED_MIME_TYPES:
-        supported=', '.join(SUPPORTED_MIME_TYPES.keys()).upper()
+    if not mime_type or mime_type not in SUPPORTED_MIME_TYPES:
+        supported = ', '.join(SUPPORTED_MIME_TYPES.keys()).upper()
         return False, (
             f'Unsupported file type: {mime_type}. '
             f'Please upload one of: {supported}.'
         ), None
-    
-    
 
     return True, '', SUPPORTED_MIME_TYPES[mime_type]
 

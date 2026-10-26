@@ -16,7 +16,9 @@ def analyze_full_resume(
 ) -> Dict:
     import logging
     logger = logging.getLogger('ats_resume_scorer')
+    logger.info("STEP 1: Starting Groq resume parsing...")
     parsed_resume = parse_resume(resume_text)
+    logger.info("STEP 1 DONE: Groq parsing finished.")
     logger.info(f"Groq parsed summary: {parsed_resume.get('professional_summary', '')[:100]!r}")
     logger.info(f"Groq parsed skills count: {len(parsed_resume.get('skills', []))}")
     logger.info(f"Groq parsed experience count: {len(parsed_resume.get('experience', []))}")
@@ -39,22 +41,26 @@ def analyze_full_resume(
         'github':    parsed_resume.get('github'),
         'portfolio': None,
     }
+    logger.info("STEP 2: Starting skill validation...")
     skill_validation = validate_skills_with_projects(
         skills=skills,
         projects=projects,
         experience_entries=parsed_resume.get('experience', []),
         embedder=embedder,
     )
+    logger.info("STEP 2 DONE: Skill validation finished.")
 
     jd_comparison_result = None
     jd_keywords = None
     if job_description and job_description.strip():
+        logger.info("STEP 3: Starting job description parsing...")
         parsed_jd = parse_job_description(job_description.strip())
         jd_keywords = list(set(
             parsed_jd.get('keywords', []) +
             parsed_jd.get('required_skills', []) +
             parsed_jd.get('preferred_skills', [])
         ))
+        logger.info("STEP 4: Starting semantic job matching...")
         jd_comparison_result = compare_resume_with_jd(
             resume_text=resume_text,
             resume_keywords=keywords,
@@ -64,13 +70,15 @@ def analyze_full_resume(
             embedder=embedder,
             nlp=nlp,
         )
+        logger.info("STEP 4 DONE: Semantic job matching finished.")
 
     from backend.utils.file_utils import (
         get_default_grammar_results, get_default_location_results,
     )
     grammar_results  = get_default_grammar_results()
     location_results = get_default_location_results()
-
+    
+    logger.info("STEP 5: Calculating ATS score...")
     scores = calculate_overall_score(
         text=resume_text,
         parsed_resume=parsed_resume,
@@ -83,6 +91,8 @@ def analyze_full_resume(
         jd_keywords=jd_keywords,
         experience_months=experience_months,
     )
+    logger.info("STEP 5 DONE: ATS scoring finished.")
+    
     detailed_feedback = analyze_issues(
         resume_text=resume_text,
         parsed_resume=parsed_resume,

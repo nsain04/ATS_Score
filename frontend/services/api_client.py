@@ -1,21 +1,26 @@
+import os
 from typing import Any, Dict, List
 
 import requests
 import streamlit as st
 
 
-DEFAULT_BACKEND_URL = "http://localhost:8000"
+DEFAULT_BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 
 def _backend_url() -> str:
+    env_url = os.getenv("BACKEND_URL")
+    if env_url:
+        return env_url
     try:
         return st.secrets["backend"]["url"]
-    except (KeyError, FileNotFoundError):
+    except (KeyError, FileNotFoundError, AttributeError):
         return DEFAULT_BACKEND_URL
 
 
 def _auth_headers(access_token: str) -> Dict[str, str]:
-    return {"Authorization": f"Bearer {access_token}"}
+    token = access_token.strip() if access_token else ""
+    return {"Authorization": f"Bearer {token}"}
 
 
 def health_check() -> Dict[str, Any]:
@@ -29,8 +34,9 @@ def analyze_resume(
     access_token: str,
     job_description: str = "",
 ) -> Dict[str, Any]:
+    file_type = getattr(resume_file, "type", None) or "application/pdf"
     files = {
-        "resume": (resume_file.name, resume_file.getvalue(), resume_file.type),
+        "resume": (resume_file.name, resume_file.getvalue(), file_type),
     }
     data = {"job_description": job_description}
     response = requests.post(

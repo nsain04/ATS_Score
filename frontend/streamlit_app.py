@@ -155,23 +155,25 @@ with st.sidebar:
                 use_container_width=True,
             )
 
+import importlib
+
 # Main content area - render based on current view
 if st.session_state.current_view == 'landing':
-    # Import and render landing page
     from frontend.views import landing
+    importlib.reload(landing)
     landing.render()
 
 elif st.session_state.current_view == 'scorer':
-    # Import and render scorer page
     from frontend.views import scorer
+    importlib.reload(scorer)
     scorer.render()
 
 elif st.session_state.current_view == 'history':
-    # Import and render history page
     from frontend.views import history
+    importlib.reload(history)
     history.render()
 
 elif st.session_state.current_view == 'resources':
-    # Import and render resources page
     from frontend.views import resources
+    importlib.reload(resources)
     resources.render()

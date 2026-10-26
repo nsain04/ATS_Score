@@ -32,17 +32,23 @@ def _read_jd(jd_file, jd_text: str) -> str:
 def _show_backend_error(exc: Exception) -> None:
     """Translate a `requests` exception into a friendly Streamlit error."""
     if isinstance(exc, requests.ConnectionError):
-        st.error("Could not reach the backend. Is `uvicorn backend.main:app` running on port 8000?")
+        st.error("🔌 Could not reach the backend at 127.0.0.1:8000. Is `uvicorn backend.main:app` running?")
     elif isinstance(exc, requests.Timeout):
-        st.error("The backend took too long to respond. Try a smaller resume or check the server logs.")
+        st.error("⏱️ The backend took too long to respond. Check the server terminal for progress.")
     elif isinstance(exc, requests.HTTPError) and exc.response is not None:
+        status_code = exc.response.status_code
         try:
             detail = exc.response.json().get("detail", exc.response.text)
-        except ValueError:
+        except Exception:
             detail = exc.response.text
-        st.error(f"Backend returned {exc.response.status_code}: {detail}")
+        if status_code == 401:
+            st.error(f"🔒 Authentication error (401): {detail}. Please sign out and sign in again from the sidebar.")
+        elif status_code == 422:
+            st.error(f"📄 File processing error (422): {detail}")
+        else:
+            st.error(f"❌ Backend returned {status_code}: {detail}")
     else:
-        st.error(f"Unexpected error: {exc}")
+        st.error(f"❌ Unexpected error: {exc}")
 
 
 def _summary_text(analysis: dict) -> str:
@@ -187,12 +193,21 @@ def render() -> None:
 
     access_token = st.session_state.get("access_token")
     if not access_token:
-        st.warning("⚠️ Sign in from the sidebar to analyze a resume.")
-        return
+        st.warning(
+            "⚠️ **Sign in required to analyze:** Please sign in or create an account in the sidebar "
+            "under **👤 Account** so your analysis can be securely authenticated."
+        )
 
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         analyze = st.button("🚀 Analyze Resume", use_container_width=True, type="primary")
+
+    if analyze and not access_token:
+        st.error(
+            "🔒 **Authentication Required:** You must be signed in to analyze your resume. "
+            "Please open the sidebar, enter your email and password under **👤 Account**, and sign in."
+        )
+        return
 
     if not analyze:
         # Re-show previous result on rerun (e.g. after PDF generation).

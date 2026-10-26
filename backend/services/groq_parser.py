@@ -12,14 +12,20 @@ GROQ_MODEL='llama-3.3-70b-versatile'
 
 _client=None
 
-def _get_client()->Groq:
+import re
+
+def _get_client() -> Groq | None:
     global _client
     if _client is None:
-        api_key=os.getenv('GROQ_API_KEY')
-
+        api_key = os.getenv('GROQ_API_KEY')
         if not api_key:
-            raise ValueError("GROQ_API_KEY environment variable not set")
-        _client=Groq(api_key=api_key)
+            logger.warning("GROQ_API_KEY environment variable not set — using local heuristic fallback for parsing.")
+            return None
+        try:
+            _client = Groq(api_key=api_key, timeout=30.0)
+        except Exception as e:
+            logger.warning(f"Failed to initialize Groq client: {e}")
+            return None
     return _client
 
 RESUME_SYSTEM_PROMPT = (
@@ -75,26 +81,23 @@ Important instructions:
 Resume Text:
 {raw_text}"""
 
-def _call_groq(client:Groq, system_prompt:str, user_prompt:str)->str:
-
-    response=client.chat.completions.create(
+def _call_groq(client: Groq, system_prompt: str, user_prompt: str) -> str:
+    response = client.chat.completions.create(
         model=GROQ_MODEL, 
         messages=[
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_prompt}
         ],
         temperature=0.0,
-        max_tokens=4096
+        max_tokens=4096,
+        timeout=30.0,
     )
-
     return response.choices[0].message.content.strip()
 
 def _try_parse_json(text: str) -> dict | None:
-
     # Strip markdown code fences if present
     cleaned = text.strip()
     if cleaned.startswith("```"):
-
         # Remove opening fence (```json or ```)
         first_newline = cleaned.index("\n") if "\n" in cleaned else len(cleaned)
         cleaned = cleaned[first_newline + 1:]
@@ -107,33 +110,98 @@ def _try_parse_json(text: str) -> dict | None:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return None
-    
-def parse_resume(raw_text: str)->Dict:
 
-    client=_get_client()
-    prompt=RESUME_USER_PROMPT.format(raw_text=raw_text)
-    raw_response=_call_groq(client, RESUME_SYSTEM_PROMPT, prompt)
-    result=_try_parse_json(raw_response)
+def _fallback_parse_resume(raw_text: str) -> Dict:
+    """Heuristic fallback parser when Groq API key is not configured or fails."""
+    email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', raw_text)
+    phone_match = re.search(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', raw_text)
+    linkedin_match = re.search(r'https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+', raw_text)
+    github_match = re.search(r'https?://(?:www\.)?github\.com/[a-zA-Z0-9_-]+', raw_text)
 
-    if result is None:
-        return _validate_resume_result(result)
-    
+    # Basic skill keywords to detect common technical competencies
+    common_skills = [
+        "python", "java", "c++", "javascript", "typescript", "react", "angular", "vue",
+        "node.js", "fastapi", "django", "flask", "docker", "kubernetes", "aws", "gcp",
+        "azure", "sql", "postgresql", "mongodb", "git", "linux", "machine learning",
+        "deep learning", "nlp", "tensorflow", "pytorch", "html", "css", "rest api"
+    ]
+    raw_lower = raw_text.lower()
+    found_skills = [s.title() for s in common_skills if re.search(r'\b' + re.escape(s) + r'\b', raw_lower)]
 
-    logger.warning("Groq resume parse: first attempt returned invalid JSON, retrying...")
-    strict_prompt = (
-        "Your previous response was not valid JSON. "
-        "Return ONLY the raw JSON object, no markdown, no explanation, no code fences.\n\n"
-        + prompt
-    )
-    raw_response = _call_groq(client, RESUME_SYSTEM_PROMPT, strict_prompt)
-    result = _try_parse_json(raw_response)
-    if result is not None:
-        return _validate_resume_result(result)
+    # Common action verbs
+    common_verbs = [
+        "developed", "built", "created", "designed", "implemented", "managed", "led",
+        "engineered", "optimized", "integrated", "automated", "deployed", "spearheaded"
+    ]
+    found_verbs = [v for v in common_verbs if re.search(r'\b' + re.escape(v) + r'\b', raw_lower)]
 
-    raise ValueError(
-        f"Groq returned unparseable response after retry. Raw response:\n{raw_response[:500]}"
-    )
-    
+    return _validate_resume_result({
+        "name": "",
+        "email": email_match.group(0) if email_match else None,
+        "phone": phone_match.group(0) if phone_match else None,
+        "linkedin": linkedin_match.group(0) if linkedin_match else None,
+        "github": github_match.group(0) if github_match else None,
+        "professional_summary": "",
+        "skills": found_skills,
+        "experience": [],
+        "education": [],
+        "certifications": [],
+        "projects": [],
+        "action_verbs": found_verbs,
+        "keywords": found_skills,
+    })
+
+def _fallback_parse_jd(raw_text: str) -> Dict:
+    """Heuristic fallback parser for job descriptions when Groq is unavailable."""
+    common_skills = [
+        "python", "java", "c++", "javascript", "typescript", "react", "node.js",
+        "fastapi", "django", "docker", "kubernetes", "aws", "sql", "postgresql",
+        "machine learning", "nlp", "git", "linux", "rest api"
+    ]
+    raw_lower = raw_text.lower()
+    found_skills = [s.title() for s in common_skills if re.search(r'\b' + re.escape(s) + r'\b', raw_lower)]
+
+    return _validate_jd_result({
+        "job_title": "",
+        "required_skills": found_skills,
+        "preferred_skills": [],
+        "experience_required": "",
+        "education_required": "",
+        "key_responsibilities": [],
+        "keywords": found_skills,
+    })
+
+def parse_resume(raw_text: str) -> Dict:
+    client = _get_client()
+    if client is None:
+        logger.info("Using fallback parser for resume (Groq client not available).")
+        return _fallback_parse_resume(raw_text)
+
+    prompt = RESUME_USER_PROMPT.format(raw_text=raw_text)
+    try:
+        raw_response = _call_groq(client, RESUME_SYSTEM_PROMPT, prompt)
+        result = _try_parse_json(raw_response)
+
+        if result is not None:
+            return _validate_resume_result(result)
+
+        logger.warning("Groq resume parse: first attempt returned invalid JSON, retrying...")
+        strict_prompt = (
+            "Your previous response was not valid JSON. "
+            "Return ONLY the raw JSON object, no markdown, no explanation, no code fences.\n\n"
+            + prompt
+        )
+        raw_response = _call_groq(client, RESUME_SYSTEM_PROMPT, strict_prompt)
+        result = _try_parse_json(raw_response)
+        if result is not None:
+            return _validate_resume_result(result)
+
+        logger.warning("Groq returned unparseable JSON after retry. Falling back to heuristic parser.")
+        return _fallback_parse_resume(raw_text)
+    except Exception as exc:
+        logger.warning(f"Groq resume parsing failed: {exc}. Falling back to heuristic parser.")
+        return _fallback_parse_resume(raw_text)
+
 JD_SYSTEM_PROMPT = (
     "You are a job description parser. Extract information and "
     "return ONLY a valid JSON object. No explanation, no markdown."
@@ -162,27 +230,33 @@ Job Description Text:
 
 def parse_job_description(raw_text: str) -> Dict:
     client = _get_client()
+    if client is None:
+        logger.info("Using fallback parser for job description (Groq client not available).")
+        return _fallback_parse_jd(raw_text)
+
     prompt = JD_USER_PROMPT.format(raw_text=raw_text)
+    try:
+        raw_response = _call_groq(client, JD_SYSTEM_PROMPT, prompt)
+        result = _try_parse_json(raw_response)
+        if result is not None:
+            return _validate_jd_result(result)
 
-    raw_response = _call_groq(client, JD_SYSTEM_PROMPT, prompt)
-    result = _try_parse_json(raw_response)
-    if result is not None:
-        return _validate_jd_result(result)
+        logger.warning("Groq JD parse: first attempt returned invalid JSON, retrying...")
+        strict_prompt = (
+            "Your previous response was not valid JSON. "
+            "Return ONLY the raw JSON object, no markdown, no explanation, no code fences.\n\n"
+            + prompt
+        )
+        raw_response = _call_groq(client, JD_SYSTEM_PROMPT, strict_prompt)
+        result = _try_parse_json(raw_response)
+        if result is not None:
+            return _validate_jd_result(result)
 
-    logger.warning("Groq JD parse: first attempt returned invalid JSON, retrying...")
-    strict_prompt = (
-        "Your previous response was not valid JSON. "
-        "Return ONLY the raw JSON object, no markdown, no explanation, no code fences.\n\n"
-        + prompt
-    )
-    raw_response = _call_groq(client, JD_SYSTEM_PROMPT, strict_prompt)
-    result = _try_parse_json(raw_response)
-    if result is not None:
-        return _validate_jd_result(result)
-
-    raise ValueError(
-        f"Groq returned unparseable response after retry. Raw response:\n{raw_response[:500]}"
-    )
+        logger.warning("Groq returned unparseable JD response after retry. Falling back to heuristic parser.")
+        return _fallback_parse_jd(raw_text)
+    except Exception as exc:
+        logger.warning(f"Groq JD parsing failed: {exc}. Falling back to heuristic parser.")
+        return _fallback_parse_jd(raw_text)
 
 #it will make sure, that the parse json has all the valid fields we expect
 def _validate_jd_result(result: dict) -> dict:
