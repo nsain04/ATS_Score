@@ -3,15 +3,15 @@ FROM python:3.11-slim
 # Prevent Python from writing .pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
     PORT=8000
 
-# Install required system packages for WeasyPrint, PyPDF, and native compilation
+# Install required system packages for WeasyPrint, file parsing, and native compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libcairo2 \
     libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf2.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
     libffi-dev \
     shared-mime-info \
     curl \
